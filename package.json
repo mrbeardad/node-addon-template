@@ -1,0 +1,16 @@
+{
+  "name": "node-addon-template",
+  "description": "",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "clean": "node-gyp clean",
+    "configure": "node-gyp configure"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.3.1"
+  },
+  "devDependencies": {
+    "node-gyp": "^11.2.0"
+  }
+}
