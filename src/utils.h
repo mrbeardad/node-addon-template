@@ -9,7 +9,73 @@
 #include <variant>
 #include <ranges>
 
-namespace utils {
+namespace util {
+
+enum class ScopeExitDummy {};
+
+template <typename T>
+class ScopeExit {
+ public:
+  ScopeExit(T&& codeChunk_) : f_(std::forward<T>(codeChunk_)) {}
+
+  ScopeExit(ScopeExit<T>&& other) : f_(std::move(other.f_)) {}
+
+  ~ScopeExit() { f_(); }
+
+ private:
+  T f_;
+};
+
+template <typename T>
+inline ScopeExit<T> operator+(ScopeExitDummy, T&& functor_) {
+  return ScopeExit<T>{std::forward<T>(functor_)};
+}
+
+#define STR_CONCAT_IMPL(x, y) x##y
+#define STR_CONCAT(x, y) STR_CONCAT_IMPL(x, y)
+#ifdef __COUNTER__
+  #define UNIQUE_VARIABLE(prefix) STR_CONCAT(prefix, __COUNTER__)
+#else
+  #define UNIQUE_VARIABLE(prefix) STR_CONCAT(prefix, __LINE__)
+#endif
+#define defer auto UNIQUE_VARIABLE(_scopeExit) = util::ScopeExitDummy{} + [&]
+
+struct UniqueHandle {
+  HANDLE handle = NULL;
+
+  UniqueHandle() = default;
+
+  UniqueHandle(HANDLE h) : handle(h) {}
+
+  UniqueHandle(const UniqueHandle&) = delete;
+  UniqueHandle& operator=(const UniqueHandle&) = delete;
+
+  UniqueHandle(UniqueHandle&& other) noexcept : handle(other.handle) { other.handle = NULL; }
+
+  UniqueHandle& operator=(UniqueHandle&& other) noexcept {
+    if (&*this != &other) {
+      if (handle) {
+        ::CloseHandle(handle);
+      }
+      handle = other.handle;
+      other.handle = NULL;
+    }
+    return *this;
+  }
+
+  ~UniqueHandle() { Close(); }
+
+  HANDLE* operator&() { return &handle; }
+
+  operator HANDLE() const { return handle; }
+
+  void Close() {
+    if (handle) {
+      ::CloseHandle(handle);
+      handle = NULL;
+    }
+  }
+};
 
 using RegType =
     std::variant<nullptr_t, DWORD, unsigned long long, std::vector<BYTE>, std::vector<std::wstring>, std::wstring>;
@@ -156,7 +222,7 @@ inline bool CreateProcessAsDesktopUser(const std::wstring& path, const std::wstr
         auto cmdline = L"\"" + path + L"\" " + argument;
         auto dir = std::filesystem::path(path).parent_path();
         PROCESS_INFORMATION pi{};
-        STARTUPINFOW si{};
+        STARTUPINFOW si{sizeof(si)};
         if (::CreateProcessAsUserW(hNewToken, NULL, cmdline.data(), NULL, NULL, FALSE, NULL, NULL, dir.c_str(), &si,
                                    &pi)) {
           ret = true;
@@ -173,4 +239,45 @@ inline bool CreateProcessAsDesktopUser(const std::wstring& path, const std::wstr
   return ret;
 }
 
-}  // namespace utils
+int char2byte(char input) {
+  if (input >= '0' && input <= '9')
+    return input - '0';
+  if (input >= 'A' && input <= 'F')
+    return input - 'A' + 10;
+  if (input >= 'a' && input <= 'f')
+    return input - 'a' + 10;
+  return -1;
+}
+
+std::string hex2bin(std::string_view hex) {
+  if (hex.size() % 2 != 0) {
+    return "";
+  }
+
+  std::string data(hex.size() / 2, '\0');
+  for (size_t i = 0; i < hex.size(); i += 2) {
+    uint8_t hi = char2byte(hex[i]);
+    uint8_t lo = char2byte(hex[i + 1]);
+    if (hi == -1 || lo == -1) {
+      return "";
+    }
+    data[i / 2] = static_cast<char>((hi << 4) | lo);
+  }
+  return data;
+}
+
+std::string bin2hex(const uint8_t* data, int len) {
+  std::stringstream ss;
+  ss << std::hex;
+
+  for (int i(0); i < len; ++i)
+    ss << std::setw(2) << std::setfill('0') << (int)data[i];
+
+  return ss.str();
+}
+
+std::string bin2hex(std::string data) {
+  return bin2hex(reinterpret_cast<const uint8_t*>(data.data()), data.size());
+}
+
+}  // namespace util
