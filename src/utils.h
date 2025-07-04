@@ -1,15 +1,27 @@
 #pragma once
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <TlHelp32.h>
+#undef min
+#undef max
+#endif  // _WIN32
 
 #include <string>
 #include <vector>
 #include <array>
 #include <variant>
 #include <ranges>
+#include <random>
+
+using namespace std::literals::string_literals;
+using namespace std::literals::string_view_literals;
+using namespace std::literals::chrono_literals;
 
 namespace util {
+
+namespace detail {
 
 enum class ScopeExitDummy {};
 
@@ -31,28 +43,205 @@ inline ScopeExit<T> operator+(ScopeExitDummy, T&& functor_) {
   return ScopeExit<T>{std::forward<T>(functor_)};
 }
 
+}  // namespace detail
+
 #define STR_CONCAT_IMPL(x, y) x##y
 #define STR_CONCAT(x, y) STR_CONCAT_IMPL(x, y)
-#ifdef __COUNTER__
-  #define UNIQUE_VARIABLE(prefix) STR_CONCAT(prefix, __COUNTER__)
-#else
-  #define UNIQUE_VARIABLE(prefix) STR_CONCAT(prefix, __LINE__)
-#endif
-#define defer auto UNIQUE_VARIABLE(_scopeExit) = util::ScopeExitDummy{} + [&]
+#define UNIQUE_VARIABLE_NAME(prefix) STR_CONCAT(prefix, __LINE__)
+#define defer auto UNIQUE_VARIABLE_NAME(_scope_exit_) = util::detail::ScopeExitDummy{} + [&]()
 
-struct UniqueHandle {
+class SpinLock {
+  std::atomic_bool locked_ = false;
+
+  static constexpr size_t MAX_WAIT_ITERS = 4096;
+  static constexpr size_t MIN_BACKOFF_ITERS = 8;
+  static constexpr size_t MAX_BACKOFF_ITERS = 1024;
+
+ public:
+  FORCEINLINE void lock() {
+    size_t curMaxDelay = MIN_BACKOFF_ITERS;
+
+    while (true) {
+      // WaitUntilLockIsFree();
+
+      if (locked_.exchange(true, std::memory_order_acquire))
+        BackoffExp(curMaxDelay);
+      else
+        break;
+    }
+  }
+
+  FORCEINLINE bool try_lock() noexcept { return !locked_.exchange(true, std::memory_order_acquire); }
+
+  FORCEINLINE void unlock() { locked_.store(false, std::memory_order_release); }
+
+ private:
+  FORCEINLINE static void CpuRelax() {
+#ifdef _MSC_VER
+    _mm_pause();
+#elif defined(__GUNC__) || defined(__clang__)
+    asm("pause");
+#endif
+  }
+
+  FORCEINLINE static void YieldSleep() {
+    // Don't yield but sleep to ensure that the thread is not
+    // immediately run again in case scheduler's run queue is empty
+    using namespace std::chrono;
+    std::this_thread::sleep_for(500us);
+  }
+
+  FORCEINLINE static inline void BackoffExp(size_t& curMaxIters) {
+    thread_local std::minstd_rand gen(std::random_device{}());
+    thread_local std::uniform_int_distribution<size_t> dist;
+
+    const size_t spinIters = dist(gen, decltype(dist)::param_type{0, curMaxIters});
+    curMaxIters = std::min(2 * curMaxIters, MAX_BACKOFF_ITERS);
+
+    for (size_t i = 0; i < spinIters; i++)
+      CpuRelax();
+  }
+
+  FORCEINLINE void WaitUntilLockIsFree() const {
+    size_t numIters = 0;
+
+    while (locked_.load(std::memory_order_relaxed)) {
+      if (numIters < MAX_WAIT_ITERS) {
+        numIters++;
+        CpuRelax();
+      } else {
+        YieldSleep();
+      }
+    }
+  }
+};
+
+int char2byte(char input) {
+  if (input >= '0' && input <= '9')
+    return input - '0';
+  if (input >= 'A' && input <= 'F')
+    return input - 'A' + 10;
+  if (input >= 'a' && input <= 'f')
+    return input - 'a' + 10;
+  return -1;
+}
+
+std::string hex2bin(std::string_view hex) {
+  if (hex.size() % 2 != 0) {
+    return "";
+  }
+
+  std::string data(hex.size() / 2, '\0');
+  for (size_t i = 0; i < hex.size(); i += 2) {
+    uint8_t hi = char2byte(hex[i]);
+    uint8_t lo = char2byte(hex[i + 1]);
+    if (hi == -1 || lo == -1) {
+      return "";
+    }
+    data[i / 2] = static_cast<char>((hi << 4) | lo);
+  }
+  return data;
+}
+
+std::string bin2hex(std::string_view data) {
+  std::stringstream ss;
+  ss << std::hex;
+
+  for (int i(0); i < data.size(); ++i)
+    ss << std::setw(2) << std::setfill('0') << (int)data[i];
+
+  return ss.str();
+}
+
+template <typename T>
+inline T read(std::istream& s) {
+  T x{};
+  s.read(reinterpret_cast<char*>(&x), sizeof(T));
+  return x;
+}
+
+template <>
+inline std::string read(std::istream& s) {
+  std::string str;
+  std::getline(s, str, '\0');
+  return str;
+}
+
+template <>
+inline std::wstring read(std::istream& s) {
+  std::wstring str;
+  for (wchar_t c; (c = read<wchar_t>(s)) != L'\0';) {
+    str += c;
+  }
+  return str;
+}
+
+inline std::string read(std::istream& s, size_t n) {
+  std::string str(n, '\0');
+  s.read(str.data(), n);
+  return str;
+}
+
+/*
+ * ============================================================================
+ * Windows Only Utils
+ * ============================================================================
+ */
+#ifdef _WIN32
+
+inline namespace win {
+
+inline std::u16string& w2ustring(std::wstring& s) {
+  return *reinterpret_cast<std::u16string*>(&s);
+}
+
+inline const std::u16string& w2ustring(const std::wstring& s) {
+  return *reinterpret_cast<const std::u16string*>(&s);
+}
+
+inline std::wstring& u2wstring(std::u16string& s) {
+  return *reinterpret_cast<std::wstring*>(&s);
+}
+
+inline const std::wstring& u2wstring(const std::u16string& s) {
+  return *reinterpret_cast<const std::wstring*>(&s);
+}
+
+inline std::string utf(const std::wstring_view& wstr) {
+  std::string strTo;
+  if (wstr.empty())
+    return strTo;
+
+  int size = ::WideCharToMultiByte(CP_UTF8, 0, wstr.data(), wstr.size(), NULL, 0, NULL, NULL);
+  strTo.resize(size);
+  ::WideCharToMultiByte(CP_UTF8, 0, wstr.data(), wstr.size(), strTo.data(), size, NULL, NULL);
+  return strTo;
+}
+
+inline std::wstring utf(const std::string_view& str) {
+  std::wstring wstrTo;
+  if (str.empty())
+    return wstrTo;
+
+  int size = ::MultiByteToWideChar(CP_UTF8, 0, str.data(), str.size(), NULL, 0);
+  wstrTo.resize(size);
+  ::MultiByteToWideChar(CP_UTF8, 0, str.data(), str.size(), wstrTo.data(), size);
+  return wstrTo;
+}
+
+struct AutoHandle {
   HANDLE handle = NULL;
 
-  UniqueHandle() = default;
+  AutoHandle() = default;
 
-  UniqueHandle(HANDLE h) : handle(h) {}
+  AutoHandle(HANDLE h) : handle(h) {}
 
-  UniqueHandle(const UniqueHandle&) = delete;
-  UniqueHandle& operator=(const UniqueHandle&) = delete;
+  AutoHandle(const AutoHandle&) = delete;
+  AutoHandle& operator=(const AutoHandle&) = delete;
 
-  UniqueHandle(UniqueHandle&& other) noexcept : handle(other.handle) { other.handle = NULL; }
+  AutoHandle(AutoHandle&& other) noexcept : handle(other.handle) { other.handle = NULL; }
 
-  UniqueHandle& operator=(UniqueHandle&& other) noexcept {
+  AutoHandle& operator=(AutoHandle&& other) noexcept {
     if (&*this != &other) {
       if (handle) {
         ::CloseHandle(handle);
@@ -63,7 +252,7 @@ struct UniqueHandle {
     return *this;
   }
 
-  ~UniqueHandle() { Close(); }
+  ~AutoHandle() { Close(); }
 
   HANDLE* operator&() { return &handle; }
 
@@ -133,7 +322,7 @@ inline RegType ReadRegValue(HKEY rootKey,
 
   result = ::RegQueryValueExW(hKey, valueName.c_str(), NULL, &dwType, data, &cbData);
 
-  RegCloseKey(hKey);
+  ::RegCloseKey(hKey);
 
   if (result != ERROR_SUCCESS) {
     var.emplace<nullptr_t>(nullptr);
@@ -239,45 +428,39 @@ inline bool CreateProcessAsDesktopUser(const std::wstring& path, const std::wstr
   return ret;
 }
 
-int char2byte(char input) {
-  if (input >= '0' && input <= '9')
-    return input - '0';
-  if (input >= 'A' && input <= 'F')
-    return input - 'A' + 10;
-  if (input >= 'a' && input <= 'f')
-    return input - 'a' + 10;
-  return -1;
-}
+inline bool KillProcessByName(const std::vector<std::wstring>& names, bool wait = true) {
+  std::vector<HANDLE> hProcesses;
 
-std::string hex2bin(std::string_view hex) {
-  if (hex.size() % 2 != 0) {
-    return "";
-  }
-
-  std::string data(hex.size() / 2, '\0');
-  for (size_t i = 0; i < hex.size(); i += 2) {
-    uint8_t hi = char2byte(hex[i]);
-    uint8_t lo = char2byte(hex[i + 1]);
-    if (hi == -1 || lo == -1) {
-      return "";
+  EnumAllProcesses([&names, &hProcesses](const PROCESSENTRY32W& entry) {
+    if (entry.th32ProcessID != 0 && std::any_of(names.begin(), names.end(), [exe = entry.szExeFile](const auto& name) {
+          return ::_wcsicmp(exe, name.c_str()) == 0;
+        })) {
+      auto hProcess = ::OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, entry.th32ProcessID);
+      if (hProcess) {
+        ::TerminateProcess(hProcess, 0);
+        hProcesses.push_back(hProcess);
+      }
     }
-    data[i / 2] = static_cast<char>((hi << 4) | lo);
+    return true;
+  });
+
+  if (wait && !hProcesses.empty()) {
+    auto res = ::WaitForMultipleObjects(hProcesses.size(), hProcesses.data(), TRUE, INFINITE);
+
+    for (auto hProcess : hProcesses) {
+      ::CloseHandle(hProcess);
+    }
+
+    if (res < WAIT_OBJECT_0 || res >= WAIT_OBJECT_0 + hProcesses.size()) {
+      return false;
+    }
   }
-  return data;
+
+  return true;
 }
 
-std::string bin2hex(const uint8_t* data, int len) {
-  std::stringstream ss;
-  ss << std::hex;
+}  // namespace win
 
-  for (int i(0); i < len; ++i)
-    ss << std::setw(2) << std::setfill('0') << (int)data[i];
-
-  return ss.str();
-}
-
-std::string bin2hex(std::string data) {
-  return bin2hex(reinterpret_cast<const uint8_t*>(data.data()), data.size());
-}
+#endif  // _WIN32
 
 }  // namespace util

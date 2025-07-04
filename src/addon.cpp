@@ -1,8 +1,7 @@
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-
 #include "napi.h"
 using namespace Napi;
+
+#include "utils.h"
 
 Value Test(const CallbackInfo& info) {
   Env env = info.Env();
