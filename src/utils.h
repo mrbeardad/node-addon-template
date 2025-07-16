@@ -116,7 +116,7 @@ class SpinLock {
   }
 };
 
-int char2byte(char input) {
+inline int char2byte(char input) {
   if (input >= '0' && input <= '9')
     return input - '0';
   if (input >= 'A' && input <= 'F')
@@ -126,7 +126,7 @@ int char2byte(char input) {
   return -1;
 }
 
-std::string hex2bin(std::string_view hex) {
+inline std::string hex2bin(std::string_view hex) {
   if (hex.size() % 2 != 0) {
     return "";
   }
@@ -143,14 +143,13 @@ std::string hex2bin(std::string_view hex) {
   return data;
 }
 
-std::string bin2hex(std::string_view data) {
-  std::stringstream ss;
-  ss << std::hex;
+inline std::string bin2hex(std::string_view data) {
+  std::string hex;
+  for (auto c : data) {
+    hex += std::format("{:02x}", c);
+  }
 
-  for (int i(0); i < data.size(); ++i)
-    ss << std::setw(2) << std::setfill('0') << (int)data[i];
-
-  return ss.str();
+  return hex;
 }
 
 template <typename T>
@@ -191,34 +190,23 @@ inline std::string read(std::istream& s, size_t n) {
 
 inline namespace win {
 
-inline std::u16string& w2ustring(std::wstring& s) {
+inline std::u16string& to_u16string(std::wstring& s) {
   return *reinterpret_cast<std::u16string*>(&s);
 }
 
-inline const std::u16string& w2ustring(const std::wstring& s) {
+inline const std::u16string& to_u16string(const std::wstring& s) {
   return *reinterpret_cast<const std::u16string*>(&s);
 }
 
-inline std::wstring& u2wstring(std::u16string& s) {
+inline std::wstring& to_wstring(std::u16string& s) {
   return *reinterpret_cast<std::wstring*>(&s);
 }
 
-inline const std::wstring& u2wstring(const std::u16string& s) {
+inline const std::wstring& to_wstring(const std::u16string& s) {
   return *reinterpret_cast<const std::wstring*>(&s);
 }
 
-inline std::string utf(const std::wstring_view& wstr) {
-  std::string strTo;
-  if (wstr.empty())
-    return strTo;
-
-  int size = ::WideCharToMultiByte(CP_UTF8, 0, wstr.data(), wstr.size(), NULL, 0, NULL, NULL);
-  strTo.resize(size);
-  ::WideCharToMultiByte(CP_UTF8, 0, wstr.data(), wstr.size(), strTo.data(), size, NULL, NULL);
-  return strTo;
-}
-
-inline std::wstring utf(const std::string_view& str) {
+inline std::wstring to_wstring(const std::string_view& str) {
   std::wstring wstrTo;
   if (str.empty())
     return wstrTo;
@@ -227,6 +215,17 @@ inline std::wstring utf(const std::string_view& str) {
   wstrTo.resize(size);
   ::MultiByteToWideChar(CP_UTF8, 0, str.data(), str.size(), wstrTo.data(), size);
   return wstrTo;
+}
+
+inline std::string to_string(const std::wstring_view& wstr) {
+  std::string strTo;
+  if (wstr.empty())
+    return strTo;
+
+  int size = ::WideCharToMultiByte(CP_UTF8, 0, wstr.data(), wstr.size(), NULL, 0, NULL, NULL);
+  strTo.resize(size);
+  ::WideCharToMultiByte(CP_UTF8, 0, wstr.data(), wstr.size(), strTo.data(), size, NULL, NULL);
+  return strTo;
 }
 
 struct AutoHandle {
@@ -269,26 +268,17 @@ struct AutoHandle {
 using RegType =
     std::variant<nullptr_t, DWORD, unsigned long long, std::vector<BYTE>, std::vector<std::wstring>, std::wstring>;
 
-inline RegType ReadRegValue(HKEY rootKey,
-                            const std::wstring& subKey,
-                            const std::wstring& valueName,
-                            DWORD* type = nullptr) {
+inline RegType GetRegValue(HKEY rootKey,
+                           const std::wstring& subKey,
+                           const std::wstring& valueName,
+                           DWORD dwFlags = RRF_RT_ANY) {
   RegType var;
 
-  HKEY hKey;
-  LSTATUS result = ::RegOpenKeyExW(rootKey, subKey.c_str(), NULL, KEY_READ, &hKey);
+  DWORD dwType = 0;
+  DWORD cbData = 0;
+  LSTATUS result = ::RegGetValueW(rootKey, subKey.c_str(), valueName.c_str(), dwFlags, &dwType, NULL, &cbData);
   if (result != ERROR_SUCCESS) {
     return var;
-  }
-
-  DWORD dwType;
-  DWORD cbData;
-  result = ::RegQueryValueExW(hKey, valueName.c_str(), NULL, &dwType, NULL, &cbData);
-  if (result != ERROR_SUCCESS) {
-    return var;
-  }
-  if (type) {
-    *type = dwType;
   }
 
   LPBYTE data = NULL;
@@ -308,7 +298,6 @@ inline RegType ReadRegValue(HKEY rootKey,
       data = reinterpret_cast<LPBYTE>(std::get<std::vector<BYTE>>(var).data());
       break;
 
-    case REG_LINK:
     case REG_SZ:
     case REG_EXPAND_SZ:
     case REG_MULTI_SZ:
@@ -317,12 +306,10 @@ inline RegType ReadRegValue(HKEY rootKey,
       break;
 
     default:
-      break;
+      return var;
   }
 
-  result = ::RegQueryValueExW(hKey, valueName.c_str(), NULL, &dwType, data, &cbData);
-
-  ::RegCloseKey(hKey);
+  result = ::RegGetValueW(rootKey, subKey.c_str(), valueName.c_str(), dwFlags, &dwType, data, &cbData);
 
   if (result != ERROR_SUCCESS) {
     var.emplace<nullptr_t>(nullptr);
@@ -337,6 +324,79 @@ inline RegType ReadRegValue(HKEY rootKey,
   }
 
   return var;
+}
+
+inline bool SetRegValue(HKEY rootKey,
+                        const std::wstring& subKey,
+                        const std::wstring& valueName,
+                        const RegType& var,
+                        bool expandSz = false) {
+  HKEY hKey = nullptr;
+  DWORD dwDisposition = 0;
+  LSTATUS result =
+      ::RegCreateKeyExW(rootKey, subKey.c_str(), NULL, NULL, NULL, KEY_SET_VALUE, NULL, &hKey, &dwDisposition);
+  if (result != ERROR_SUCCESS) {
+    return false;
+  }
+
+  DWORD type = 0;
+  const BYTE* data = NULL;
+  size_t cbData = 0;
+  std::wstring multiSz;
+  std::visit(
+      [&](auto& arg) {
+        using T = std::decay_t<decltype(arg)>;
+        if constexpr (std::is_same_v<T, nullptr_t>) {
+          type = REG_NONE;
+          data = nullptr;
+          cbData = 0;
+        } else if constexpr (std::is_same_v<T, DWORD>) {
+          type = REG_DWORD;
+          data = reinterpret_cast<const BYTE*>(&arg);
+          cbData = sizeof(T);
+        } else if constexpr (std::is_same_v<T, unsigned long long>) {
+          type = REG_QWORD;
+          data = reinterpret_cast<const BYTE*>(&arg);
+          cbData = sizeof(T);
+        } else if constexpr (std::is_same_v<T, std::vector<BYTE>>) {
+          type = REG_BINARY;
+          data = reinterpret_cast<const BYTE*>(arg.data());
+          cbData = arg.size();
+        } else if constexpr (std::is_same_v<T, std::vector<std::wstring>>) {
+          for (auto& s : arg) {
+            multiSz += s + L'\0';
+          }
+          type = REG_MULTI_SZ;
+          data = reinterpret_cast<const BYTE*>(multiSz.c_str());
+          cbData = (multiSz.size() + 1) * sizeof(wchar_t);
+        } else if constexpr (std::is_same_v<T, std::wstring>) {
+          type = expandSz ? REG_EXPAND_SZ : REG_SZ;
+          data = reinterpret_cast<const BYTE*>(arg.c_str());
+          cbData = (arg.size() + 1) * sizeof(wchar_t);
+        }
+      },
+      var);
+
+  result = ::RegSetValueExW(hKey, valueName.c_str(), 0, type, data, cbData);
+  ::RegCloseKey(hKey);
+
+  return result == ERROR_SUCCESS;
+}
+
+inline bool SetRegValue(HKEY rootKey,
+                        const std::wstring& subKey,
+                        const std::wstring& valueName,
+                        const std::initializer_list<BYTE>& var,
+                        bool expandSz = false) {
+  return SetRegValue(rootKey, subKey, valueName, std::vector<BYTE>{var}, expandSz);
+}
+
+inline bool SetRegValue(HKEY rootKey,
+                        const std::wstring& subKey,
+                        const std::wstring& valueName,
+                        const std::initializer_list<std::wstring>& var,
+                        bool expandSz = false) {
+  return SetRegValue(rootKey, subKey, valueName, std::vector<std::wstring>{var}, expandSz);
 }
 
 inline void EnumAllProcesses(std::function<bool(const PROCESSENTRY32W&)> callback) {
@@ -375,30 +435,25 @@ inline bool IsProcessElevated(DWORD pid) {
   return isElevated;
 }
 
-inline bool CreateProcessAsDesktopUser(const std::wstring& path, const std::wstring& argument) {
-  // Find explorer.exe of current session
-  DWORD sid = -1;
-  if (!::ProcessIdToSessionId(::GetCurrentProcessId(), &sid)) {
-    return false;
+inline AutoHandle CreateProcessAsDesktopUser(const std::wstring& path,
+                                             const std::wstring& argument,
+                                             const std::wstring& cwd = L"") {
+  AutoHandle hChild;
+  // "Shell_TrayWnd" is the class name for the taskbar window, owned by explorer.exe
+  HWND hwnd = ::FindWindowW(L"Shell_TrayWnd", NULL);
+  if (!hwnd) {
+    // Fallback: try desktop window (class "Progman")
+    hwnd = ::FindWindowW(L"Progman", NULL);
   }
-
   DWORD pid = 0;
-  EnumAllProcesses([sid, &pid](const PROCESSENTRY32W& entry) {
-    if (entry.th32ProcessID > 0 && ::_wcsicmp(entry.szExeFile, L"explorer.exe") == 0) {
-      DWORD procSid = -1;
-      if (::ProcessIdToSessionId(entry.th32ProcessID, &procSid) && procSid == sid) {
-        pid = entry.th32ProcessID;
-        return false;
-      }
-    }
-    return true;
-  });
+  if (hwnd) {
+    ::GetWindowThreadProcessId(hwnd, &pid);
+  }
 
   if (pid == 0) {
-    return false;
+    return hChild;
   }
 
-  bool ret = false;
   HANDLE hProcess = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
   if (hProcess) {
     HANDLE hToken;
@@ -409,13 +464,12 @@ inline bool CreateProcessAsDesktopUser(const std::wstring& path, const std::wstr
               TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY | TOKEN_DUPLICATE | TOKEN_ADJUST_DEFAULT | TOKEN_ADJUST_SESSIONID,
               NULL, SecurityImpersonation, TokenPrimary, &hNewToken)) {
         auto cmdline = L"\"" + path + L"\" " + argument;
-        auto dir = std::filesystem::path(path).parent_path();
+        auto dir = cwd.empty() ? std::filesystem::path(path).parent_path().wstring() : cwd;
         PROCESS_INFORMATION pi{};
         STARTUPINFOW si{sizeof(si)};
         if (::CreateProcessAsUserW(hNewToken, NULL, cmdline.data(), NULL, NULL, FALSE, NULL, NULL, dir.c_str(), &si,
                                    &pi)) {
-          ret = true;
-          ::CloseHandle(pi.hProcess);
+          hChild = pi.hProcess;
           ::CloseHandle(pi.hThread);
         }
         ::CloseHandle(hNewToken);
@@ -425,20 +479,42 @@ inline bool CreateProcessAsDesktopUser(const std::wstring& path, const std::wstr
     ::CloseHandle(hProcess);
   }
 
-  return ret;
+  return hChild;
 }
 
-inline bool KillProcessByName(const std::vector<std::wstring>& names, bool wait = true) {
-  std::vector<HANDLE> hProcesses;
+inline AutoHandle CreateProcessAsAdmin(const std::wstring& path,
+                                       const std::wstring& argument,
+                                       const std::wstring& cwd = L"") {
+  AutoHandle hProcess;
+  auto dir = cwd.empty() ? std::filesystem::path(path).parent_path().wstring() : cwd;
+  SHELLEXECUTEINFOW sei{};
+  sei.cbSize = sizeof(sei);
+  sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+  sei.lpVerb = L"runas";
+  sei.lpFile = path.c_str();
+  sei.lpParameters = argument.c_str();
+  sei.lpDirectory = dir.c_str();
+  sei.nShow = SW_NORMAL;
 
-  EnumAllProcesses([&names, &hProcesses](const PROCESSENTRY32W& entry) {
+  if (::ShellExecuteExW(&sei)) {
+    hProcess = sei.hProcess;
+  }
+  return hProcess;
+}
+
+inline bool KillProcessByNames(const std::vector<std::wstring>& names, bool wait = true) {
+  std::vector<HANDLE> hProcesses;
+  bool failed = false;
+
+  EnumAllProcesses([&](const PROCESSENTRY32W& entry) {
     if (entry.th32ProcessID != 0 && std::any_of(names.begin(), names.end(), [exe = entry.szExeFile](const auto& name) {
           return ::_wcsicmp(exe, name.c_str()) == 0;
         })) {
       auto hProcess = ::OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, entry.th32ProcessID);
-      if (hProcess) {
-        ::TerminateProcess(hProcess, 0);
+      if (hProcess && ::TerminateProcess(hProcess, 0)) {
         hProcesses.push_back(hProcess);
+      } else {
+        failed = true;
       }
     }
     return true;
@@ -456,7 +532,35 @@ inline bool KillProcessByName(const std::vector<std::wstring>& names, bool wait 
     }
   }
 
-  return true;
+  return !failed;
+}
+
+inline bool KillProcessByProcessIds(const std::vector<DWORD>& processIds, bool wait = true) {
+  std::vector<HANDLE> hProcesses;
+  bool failed = false;
+
+  for (auto pid : processIds) {
+    auto hProcess = ::OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid);
+    if (hProcess && ::TerminateProcess(hProcess, 0)) {
+      hProcesses.push_back(hProcess);
+    } else {
+      failed = true;
+    }
+  }
+
+  if (wait && !hProcesses.empty()) {
+    auto res = ::WaitForMultipleObjects(hProcesses.size(), hProcesses.data(), TRUE, INFINITE);
+
+    for (auto hProcess : hProcesses) {
+      ::CloseHandle(hProcess);
+    }
+
+    if (res < WAIT_OBJECT_0 || res >= WAIT_OBJECT_0 + hProcesses.size()) {
+      return false;
+    }
+  }
+
+  return !failed;
 }
 
 }  // namespace win
