@@ -1,16 +1,21 @@
 {
-  "name": "node-addon-template",
-  "description": "",
+  "name": "my_addon",
+  "description": "Contains skeleton code to generate a native addon based on node-addon-api",
   "version": "1.0.0",
   "main": "index.js",
+  "types": "index.d.ts",
   "scripts": {
     "clean": "node-gyp clean",
-    "configure": "node-gyp configure"
+    "configure": "node-gyp configure",
+    "build": "node-gyp build",
+    "rebuild": "node-gyp rebuild",
+    "test": "node test.js"
   },
   "dependencies": {
-    "node-addon-api": "^8.3.1"
+    "bindings": "*",
+    "node-addon-api": "*"
   },
   "devDependencies": {
-    "node-gyp": "^11.2.0"
+    "node-gyp": "*"
   }
 }
