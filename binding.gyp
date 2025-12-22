@@ -1,12 +1,10 @@
 {
   "variables": {
-    "std": "c++20",
-    "src_files": "<!(node -e \"require('fs').readdirSync('src', {withFileTypes:true}).filter(e => (e.isFile() && e.name.endsWith('.cpp'))).forEach(e => (console.log(path.join(e.parentPath, e.name).replace('\\\\', '\\\\\\\\'))))\")"
+    "cppstd": "20",
   },
   "target_defaults": {
-    "sources": ["<@(src_files)"],
     "dependencies": ["<!(node -p \"require('node-addon-api').targets\"):node_addon_api_except_all"],
-    "cflags_cc": ["-std=<(std)"],
+    "cflags_cc": ["-std=c++<(cppstd)"],
     "conditions": [
       [
         "OS=='win'",
@@ -19,7 +17,7 @@
           },
           "msvs_settings": {
             "VCCLCompilerTool": {
-              "AdditionalOptions": ["/std:<(std)"]
+              "LanguageStandard": "stdcpp<(cppstd)"
             }
           }
         }
@@ -29,6 +27,7 @@
   "targets": [
     {
       "target_name": "my_addon",
+      "sources": ["<!(node -e \"require('fs').readdirSync('src', {withFileTypes:true}).filter(e => (e.isFile() && e.name.endsWith('.cpp'))).forEach(e => (console.log(path.join(e.parentPath, e.name).replace('\\\\', '\\\\\\\\'))))\")"],
       "include_dirs": [],
       "libraries": [],
       "defines": [],
