@@ -17,7 +17,7 @@
           },
           "msvs_settings": {
             "VCCLCompilerTool": {
-              "LanguageStandard": "stdcpp<(cppstd)"
+              "AdditionalOptions": ["%(AdditionalOptions)", "/std:c++<(cppstd)"]
             }
           }
         }
