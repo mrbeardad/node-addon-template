@@ -2,18 +2,24 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug C++ addon (test.js)",
+      "name": "Debug C++ addon (Vitest)",
       "type": "cppvsdbg",
       "request": "launch",
       "program": "node",
-      "args": ["${workspaceFolder}\\__test__\\test.js"],
+      "args": [
+        "${workspaceFolder}\\node_modules\\vitest\\vitest.mjs",
+        "run",
+        "--globals",
+        "${workspaceFolder}\\__test__\\addon.test.js"
+      ],
       "cwd": "${workspaceFolder}"
     },
     {
       "name": "Debug C++ + JS (hybrid)",
       "type": "node",
       "request": "launch",
-      "program": "${workspaceFolder}\\__test__\\test.js",
+      "program": "${workspaceFolder}\\node_modules\\vitest\\vitest.mjs",
+      "args": ["run", "--globals", "${workspaceFolder}\\__test__\\addon.test.js"],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "serverReadyAction": {
