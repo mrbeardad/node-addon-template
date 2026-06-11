@@ -1,16 +1,14 @@
-﻿#include "napi.h"
-using namespace Napi;
+﻿#include <napi.h>
 
-Value Test(const CallbackInfo& info) {
-  Env env = info.Env();
-  // ...
-  return env.Undefined();
+Napi::Value Hello(const Napi::CallbackInfo& info)
+{
+    return Napi::String::New(info.Env(), "Hello, world!");
 }
 
-Object Init(Env env, Object exports) {
-  exports["test"] = Function::New<Test>(env);
-
-  return exports;
+Napi::Object Init(Napi::Env env, Napi::Object exports)
+{
+    exports["hello"] = Napi::Function::New<Hello>(env);
+    return exports;
 }
 
-NODE_API_MODULE(NODE_GYP_MODULE_NAME, Init)
+NODE_API_MODULE(my_addon, Init)

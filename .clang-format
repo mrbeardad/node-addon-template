@@ -1,0 +1,4 @@
+BasedOnStyle: Microsoft
+SeparateDefinitionBlocks: Always
+BreakTemplateDeclarations: Yes
+PointerAlignment: Left

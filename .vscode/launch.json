@@ -1,0 +1,32 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug C++ addon (test.js)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "node",
+      "args": ["${workspaceFolder}\\__test__\\test.js"],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Debug C++ + JS (hybrid)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}\\__test__\\test.js",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "serverReadyAction": {
+        "pattern": "Debugger listening on ws://\\S+:9229",
+        "action": "startDebugging",
+        "name": "Attach C++ debugger"
+      }
+    },
+    {
+      "name": "Attach C++ debugger",
+      "type": "cppvsdbg",
+      "request": "attach",
+      "processId": "${command:pickProcess}"
+    }
+  ]
+}

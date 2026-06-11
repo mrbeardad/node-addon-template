@@ -1,1 +1,1 @@
-export function test(): void;
+export function hello(): string;
