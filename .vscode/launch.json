@@ -1,38 +1,40 @@
 {
   "version": "0.2.0",
+  "compounds": [
+    {
+      "name": "Debug C++ & JS (Vitest)",
+      "configurations": ["Launch Vitest with C++ debugger", "Attach JS debugger"],
+      "stopAll": true
+    }
+  ],
   "configurations": [
     {
-      "name": "Debug C++ addon (Vitest)",
+      "name": "Launch Vitest with C++ debugger",
       "type": "cppvsdbg",
       "request": "launch",
       "program": "node",
       "args": [
-        "${workspaceFolder}\\node_modules\\vitest\\vitest.mjs",
+        "--inspect-wait=9229",
+        "${workspaceFolder}/node_modules/vitest/vitest.mjs",
         "run",
         "--globals",
-        "${workspaceFolder}\\__test__\\addon.test.js"
+        "--pool=threads",
+        "--no-file-parallelism",
+        "--maxWorkers=1"
       ],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "name": "Debug C++ + JS (hybrid)",
-      "type": "node",
-      "request": "launch",
-      "program": "${workspaceFolder}\\node_modules\\vitest\\vitest.mjs",
-      "args": ["run", "--globals", "${workspaceFolder}\\__test__\\addon.test.js"],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
-      "serverReadyAction": {
-        "pattern": "Debugger listening on ws://\\S+:9229",
-        "action": "startDebugging",
-        "name": "Attach C++ debugger"
-      }
+      "symbolSearchPath": "${workspaceFolder}/build"
     },
     {
-      "name": "Attach C++ debugger",
-      "type": "cppvsdbg",
+      "name": "Attach JS debugger",
+      "type": "node",
       "request": "attach",
-      "processId": "${command:pickProcess}"
+      "port": 9229,
+      "address": "localhost",
+      "restart": false,
+      "timeout": 30000,
+      "skipFiles": ["<node_internals>/**"]
     }
   ]
 }

@@ -10,10 +10,10 @@
   "main": "index.js",
   "types": "index.d.ts",
   "scripts": {
-    "clean": "cmake-js clean",
-    "configure": "cmake-js configure -G Ninja --CDCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-    "build": "cmake-js build -G Ninja --CDCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-    "rebuild": "cmake-js rebuild -G Ninja",
+    "clean": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/cmake-js-msvc.ps1 clean",
+    "configure": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/cmake-js-msvc.ps1 configure -G Ninja --CDCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+    "build": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/cmake-js-msvc.ps1 compile -G Ninja --CDCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+    "rebuild": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/cmake-js-msvc.ps1 rebuild -G Ninja  --CDCMAKE_EXPORT_COMPILE_COMMANDS=ON",
     "test": "vitest run --globals"
   },
   "dependencies": {
